@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VR Gaussian Splat Viewer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            overflow: hidden;
+            background: #000;
+        }
+
+        #container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 8px;
+            font-size: 14px;
+            z-index: 100;
+            max-width: 300px;
+        }
+
+        #vrButton {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 15px 30px;
+            font-size: 16px;
+            font-weight: bold;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            z-index: 100;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+            transition: all 0.3s ease;
+        }
+
+        #vrButton:hover {
+            background: #45a049;
+            transform: translateX(-50%) scale(1.05);
+        }
+
+        #vrButton:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 18px;
+            text-align: center;
+            z-index: 99;
+        }
+
+        .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-top: 4px solid white;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div id="container"></div>
+
+    <div id="info">
+        <h3>VR Gaussian Splat Viewer</h3>
+        <p>📱 Use a VR headset or Google Cardboard</p>
+        <p>🎮 Desktop: Click and drag to rotate</p>
+        <p id="status">Initializing...</p>
+    </div>
+
+    <div id="loading">
+        <div class="spinner"></div>
+        <div>Loading Gaussian Splat...</div>
+    </div>
+
+    <button id="vrButton" disabled>Enter VR</button>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+            "@mkkellogg/gaussian-splats-3d": "https://cdn.jsdelivr.net/npm/@mkkellogg/gaussian-splats-3d@0.8.0/build/gaussian-splats-3d.module.js"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { VRButton } from 'three/addons/webxr/VRButton.js';
+        import * as GaussianSplats3D from '@mkkellogg/gaussian-splats-3d';
+
+        let viewer;
+        const container = document.getElementById('container');
+        const loading = document.getElementById('loading');
+        const statusText = document.getElementById('status');
+        const vrButton = document.getElementById('vrButton');
+
+        async function init() {
+            try {
+                statusText.textContent = 'Creating viewer...';
+
+                // Create the Gaussian Splat viewer
+                viewer = new GaussianSplats3D.Viewer({
+                    cameraUp: [0, -1, -0.6],
+                    initialCameraPosition: [-1, -4, 6],
+                    initialCameraLookAt: [0, 4, -0],
+                    selfDrivenMode: false,
+                    renderer: {
+                        antialias: false,
+                        precision: 'highp',
+                        powerPreference: 'high-performance',
+                    },
+                    enableVR: true  // Enable VR support
+                });
+
+                // Add the viewer to the container
+                const rootElement = viewer.getRootElement();
+                container.appendChild(rootElement);
+
+                // Style the viewer element
+                rootElement.style.position = 'absolute';
+                rootElement.style.width = '100%';
+                rootElement.style.height = '100%';
+
+                statusText.textContent = 'Loading splat file...';
+
+                // Load a sample Gaussian splat
+                // Using the train scene from the original Gaussian Splatting paper
+                const splatUrl = 'https://huggingface.co/datasets/dylanebert/3dgs/resolve/main/bonsai/point_cloud/iteration_7000/point_cloud.ply';
+
+                await viewer.addSplatScene(splatUrl, {
+                    progressiveLoad: true,
+                    rotation: [0, 0, 0, 1],
+                    position: [0, 1, 0],
+                    scale: [1.5, 1.5, 1.5]
+                });
+
+                statusText.textContent = 'Ready! 🎉';
+                loading.style.display = 'none';
+
+                // Start the viewer
+                viewer.start();
+
+                // Set up VR button
+                setupVRButton();
+
+                // Add resize handler
+                window.addEventListener('resize', onWindowResize, false);
+
+            } catch (error) {
+                console.error('Error initializing viewer:', error);
+                statusText.textContent = '❌ Error: ' + error.message;
+                loading.innerHTML = '<div style="color: #ff6b6b;">Failed to load. Check console for details.</div>';
+            }
+        }
+
+        function setupVRButton() {
+            const renderer = viewer.getRenderer();
+            const scene = viewer.getScene();
+            const camera = viewer.getCamera();
+
+            if ('xr' in navigator) {
+                navigator.xr.isSessionSupported('immersive-vr').then((supported) => {
+                    if (supported) {
+                        vrButton.disabled = false;
+                        vrButton.textContent = 'Enter VR';
+
+                        vrButton.addEventListener('click', async () => {
+                            if (renderer.xr.isPresenting) {
+                                await renderer.xr.getSession().end();
+                            } else {
+                                try {
+                                    renderer.xr.enabled = true;
+                                    const session = await navigator.xr.requestSession('immersive-vr', {
+                                        optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking']
+                                    });
+                                    await renderer.xr.setSession(session);
+                                    vrButton.textContent = 'Exit VR';
+                                } catch (error) {
+                                    console.error('Failed to start VR session:', error);
+                                    alert('Failed to start VR: ' + error.message);
+                                }
+                            }
+                        });
+                    } else {
+                        vrButton.textContent = 'VR Not Supported';
+                        statusText.innerHTML += '<br>💡 Tip: Use a VR-capable browser on a headset';
+                    }
+                });
+            } else {
+                vrButton.textContent = 'WebXR Not Available';
+                statusText.innerHTML += '<br>💡 Try Chrome or Firefox on a VR device';
+            }
+        }
+
+        function onWindowResize() {
+            if (viewer) {
+                const camera = viewer.getCamera();
+                const renderer = viewer.getRenderer();
+
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            }
+        }
+
+        // Initialize the app
+        init();
+    </script>
+</body>
+</html>
